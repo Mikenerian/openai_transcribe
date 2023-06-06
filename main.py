@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 from pydub import AudioSegment
 import openai
 
+
+
 # 環境変数の呼び出し
 # API_KEY='your api key' の形式で.envファイルに記述
 load_dotenv()
