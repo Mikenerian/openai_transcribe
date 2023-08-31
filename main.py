@@ -1,6 +1,7 @@
 
 # 必要なモジュールのインストール
 import os
+import time
 import fnmatch
 from dotenv import load_dotenv
 from pydub import AudioSegment
@@ -17,11 +18,11 @@ openai.api_key = os.getenv('API_KEY')
 input_dir = 'input'
 os.makedirs(input_dir, exist_ok=True)
 
-# 音声ファイルを変換・分割した結果を格納するフォルダの作成
+# 音声ファイルを変換・分割した結果を格納するフォルダの作成（未作成の場合）
 conv_dir ='converted'
 os.makedirs(conv_dir, exist_ok=True)
 
-# テキスト化結果を格納するフォルダの作成
+# テキスト化結果を格納するフォルダの作成（未作成の場合）
 output_dir = "output"
 os.makedirs(output_dir, exist_ok=True)
 
@@ -40,7 +41,7 @@ for root, dirnames, filenames in os.walk(input_dir):
 split_time = 20 * 60 * 1000
 overlap = 20 * 1000
 
-print(f"{len(audio_files)} files found.")
+print(f"{len(audio_files)}個の音声ファイルが見つかりました")
 print(audio_files)
 
 for num, fname in enumerate(audio_files):
@@ -65,8 +66,7 @@ for num, fname in enumerate(audio_files):
     for i in range(0, len(audio), split_time - overlap):
         segments.append(audio[i:i + split_time])
     
-    print("音声ファイルは分割されました")
-    print(segments)
+    print(f"音声ファイルは{len(segments)}個に分割されました")
 
     # 分割ファイルごとに処理
     for i, segment in enumerate(segments):
@@ -88,3 +88,9 @@ for num, fname in enumerate(audio_files):
         f.close()
 
         print("テキストを次の名前で保存しました： " + output_txt)
+    
+    # API制限を回避するため、念のためファイル単位でインターバルを設ける
+    if num < len(audio_files) - 1:
+        print("30秒のインターバルに入ります")
+        time.sleep(30)
+        print("インターバル終了。次のファイルを処理します")
