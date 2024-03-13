@@ -5,14 +5,14 @@ import time
 import fnmatch
 from dotenv import load_dotenv
 from pydub import AudioSegment
-import openai
-
-
+from openai import OpenAI
 
 # 環境変数の呼び出し
-# API_KEY='your api key' の形式で.envファイルに記述
+# 事前にAPI_KEY='your api key' の形式で.envファイルに記述しておく
 load_dotenv()
-openai.api_key = os.getenv('API_KEY')
+client = OpenAI(
+    api_key=os.getenv('API_KEY')
+)
 
 # 音声ファイルを格納するフォルダの作成（未作成の場合）
 input_dir = 'input'
@@ -78,8 +78,12 @@ for num, fname in enumerate(audio_files):
         mp3_audio = open(os.path.join(conv_dir, output_mp3), "rb")
 
         # 音声テキスト化
-        transcript = openai.Audio.transcribe("whisper-1", mp3_audio)
-        txt = transcript['text']
+        # transcript = openai.Audio.transcribe("whisper-1", mp3_audio)
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=mp3_audio
+        )
+        txt = transcript.text
 
         # テキスト形式で保存
         output_txt = f"{base_name}_{i:04d}.txt"
