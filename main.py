@@ -29,8 +29,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 
 # 指定フォルダから音声ファイルを取得
-# NOTE: 音声ファイルとして想定する拡張子をextensionsに定義
-extensions = ['*.mp3', '*.MP3', '*.m4a', '*.M4A', '*.wav', '*.WAV']
+extensions = ['*.mp3', '*.MP3', '*.m4a', '*.M4A', '*.wav', '*.WAV']  # 利用可能な音声ファイル形式
 audio_files = []
 for root, dirnames, filenames in os.walk(input_dir):
     for ext in extensions:
@@ -39,7 +38,7 @@ for root, dirnames, filenames in os.walk(input_dir):
 
 # 1ファイルあたりの最大長（ミリ秒）
 split_time = 20 * 60 * 1000
-overlap = 20 * 1000
+overlap = 20 * 1000  # ファイルを分割するときは20秒（適当）重複区間を設ける
 
 print(f"{len(audio_files)}個の音声ファイルが見つかりました")
 print(audio_files)
@@ -50,7 +49,7 @@ for num, fname in enumerate(audio_files):
     output_fname = os.path.join(output_dir, fname)
     base_name, extension = os.path.splitext(fname)
 
-    # ファイル情報から音声化
+    # 音声ファイルの取得
     extension = extension.lower()  # 拡張子を小文字に変換
     if extension == '.mp3':
         audio = AudioSegment.from_mp3(input_fname)
@@ -68,15 +67,22 @@ for num, fname in enumerate(audio_files):
     
     print(f"音声ファイルは{len(segments)}個に分割されました")
 
-    # 分割ファイルごとに処理
+    # 分割ファイルの保存
     for i, segment in enumerate(segments):
+        
         # 分割ファイルをmp3形式で保存
         output_mp3 = f"{base_name}_{i:04d}.mp3"
         segment.export(os.path.join(conv_dir, output_mp3), format="mp3")
+    
+    print("分割した音声ファイルを保存しました")
 
+    # 音声テキスト化
+    for i, segment in enumerate(segments):
         # mp3の読み込み
+        output_mp3 = f"{base_name}_{i:04d}.mp3"
         mp3_audio = open(os.path.join(conv_dir, output_mp3), "rb")
 
+        print("音声をテキスト化しています...")
         # 音声テキスト化
         # transcript = openai.Audio.transcribe("whisper-1", mp3_audio)
         transcript = client.audio.transcriptions.create(
