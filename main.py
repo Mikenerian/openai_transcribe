@@ -1,106 +1,156 @@
-
-# 必要なモジュールのインストール
 import os
+import re
 import time
-import fnmatch
+from glob import glob
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from openai import OpenAI
 
-# 環境変数の呼び出し
-# 事前にAPI_KEY='your api key' の形式で.envファイルに記述しておく
-load_dotenv()
-client = OpenAI(
-    api_key=os.getenv('API_KEY')
-)
+# 設定
+INPUT_DIR = 'input'  # 音声ファイルを格納
+CONV_DIR = 'converted'  # 中間生成ファイルを格納
+OUTPUT_DIR = "output"  # 生成されたテキストファイルを格納
+SPLIT_TIME = 20 * 60 * 1000  # 1ファイルあたりの最大長（ミリ秒）
+OVERLAP = 20 * 1000  # ファイル分割時の重複区間（ミリ秒）
+INTERVAL = 30  # API 制限回避のためのインターバル（秒）
 
-# 音声ファイルを格納するフォルダの作成（未作成の場合）
-input_dir = 'input'
-os.makedirs(input_dir, exist_ok=True)
+def setup_directories():
+    """必要なディレクトリを作成する"""
+    os.makedirs(INPUT_DIR, exist_ok=True)
+    os.makedirs(CONV_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# 音声ファイルを変換・分割した結果を格納するフォルダの作成（未作成の場合）
-conv_dir ='converted'
-os.makedirs(conv_dir, exist_ok=True)
+def load_audio_files(input_dir):
+    """指定されたディレクトリから音声ファイルを読み込み"""
+    extensions = ['*.mp3', '*.m4a', '*.wav']  # 対応している音声ファイルの形式
+    audio_files = []
 
-# テキスト化結果を格納するフォルダの作成（未作成の場合）
-output_dir = "output"
-os.makedirs(output_dir, exist_ok=True)
-
-
-
-# 指定フォルダから音声ファイルを取得
-extensions = ['*.mp3', '*.MP3', '*.m4a', '*.M4A', '*.wav', '*.WAV']  # 利用可能な音声ファイル形式
-audio_files = []
-for root, dirnames, filenames in os.walk(input_dir):
     for ext in extensions:
-        for filename in fnmatch.filter(filenames, ext):
-            audio_files.append(filename)
+        files = glob(os.path.join(input_dir, ext)) + glob(os.path.join(input_dir, ext.upper()))
+        for file_path in files:
+            file_name = os.path.basename(file_path)
+            _, extension = os.path.splitext(file_name)
+            extension = extension.lower()
 
-# 1ファイルあたりの最大長（ミリ秒）
-split_time = 20 * 60 * 1000
-overlap = 20 * 1000  # ファイルを分割するときは20秒（適当）重複区間を設ける
+            try:
+                if extension == '.mp3':
+                    audio = AudioSegment.from_mp3(file_path)
+                elif extension == '.m4a':
+                    audio = AudioSegment.from_file(file_path)
+                elif extension == '.wav':
+                    audio = AudioSegment.from_wav(file_path)
+                else:
+                    raise ValueError(f"{file_name}は無効な形式のファイルです")
 
-print(f"{len(audio_files)}個の音声ファイルが見つかりました")
-print(audio_files)
+                audio_files.append((file_name, audio))  # ファイル名と音声ファイルをタプルとして格納
 
-for num, fname in enumerate(audio_files):
-    print(fname + " を音声テキスト化します")
-    input_fname = os.path.join(input_dir, fname)
-    output_fname = os.path.join(output_dir, fname)
-    base_name, extension = os.path.splitext(fname)
+            except ValueError as e:
+                print(e)  # エラーメッセージを表示
+
+    return audio_files
+
+def split_audio(file_name, audio, split_time, overlap):
+    """音声ファイルを分割して保存する"""
+    base_name, _ = os.path.splitext(file_name)
+    for i, x in enumerate(range(0, len(audio), split_time - overlap)):
+        output_name = f"{base_name}_{i:04d}.mp3"
+        segment_audio = audio[x:x + split_time]
+        segment_audio.export(os.path.join(CONV_DIR, output_name), format="mp3")
+
+def list_segmented_audio(converted_dir):
+    """分割した音声ファイルの一覧取得"""
+    mp3_files = glob(os.path.join(converted_dir, "*.mp3"))
+    mp3_file_names = [os.path.basename(file_path) for file_path in mp3_files]
+    mp3_file_names = sorted(mp3_file_names)
+    return mp3_file_names
+
+def transcribe_audio(converted_dir, file_name, client):
+    """音声をテキスト化する"""
+    file_path = os.path.join(converted_dir, file_name)  
+
+    try:
+        with open(file_path, "rb") as mp3_audio:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=mp3_audio
+            )
+            return transcript.text
+
+    except Exception as e:
+        print(f"Error transcribing {file_name}: {e}")
+        return None
+
+def save_transcript(converted_dir, file_name, txt):
+    """テキストをファイルに保存する"""
+    base_name, _ = os.path.splitext(file_name)
+    txt_name = f"{base_name}.txt"
+    with open(os.path.join(converted_dir, txt_name), "w") as f:
+        f.write(txt)
+
+def combine_text_files(converted_dir, output_dir):
+    """分割されたテキストファイルを結合する"""
+    txt_files = glob(os.path.join(converted_dir, "*.txt"))
+    file_groups = {}
+    for file_path in txt_files:
+        file_name = os.path.basename(file_path)
+        match = re.match(r"(.+)_(\d+)\.txt", file_name)
+        if match:
+            base_name = match.group(1)
+            if base_name not in file_groups:
+                file_groups[base_name] = []
+            file_groups[base_name].append(file_path)
+
+    for base_name, file_paths in file_groups.items():
+        # ファイルパスを連番順にソート
+        file_paths.sort(key=lambda x: int(re.match(r".*_(\d+)\.txt", os.path.basename(x)).group(1)))
+
+        combined_text = ""
+        for file_path in file_paths:
+            with open(file_path, "r") as f:
+                combined_text += f.read()
+                combined_text += "\n"  # ファイル間に改行を入れる（必要に応じて）
+
+        # 結合したテキストをoutputディレクトリに保存
+        output_file_path = os.path.join(output_dir, f"{base_name}.txt")
+        with open(output_file_path, "w") as f:
+            f.write(combined_text)
+
+
+
+if __name__ == "__main__":
+    # 変数の読み込み
+    load_dotenv()
+    setup_directories()
+    client = OpenAI(api_key=os.getenv('API_KEY'))
 
     # 音声ファイルの取得
-    extension = extension.lower()  # 拡張子を小文字に変換
-    if extension == '.mp3':
-        audio = AudioSegment.from_mp3(input_fname)
-    elif extension == '.m4a':
-        audio = AudioSegment.from_file(input_fname, 'm4a')
-    elif extension == '.wav':
-        audio = AudioSegment.from_wav(input_fname)
-    else:
-        print("音声ファイルの形式が無効です")
+    audio_files = load_audio_files(INPUT_DIR)
+    print(f"{len(audio_files)}個の音声ファイルが見つかりました")
+    for file_name, _ in audio_files:
+        print(file_name)
 
     # 音声ファイルの分割
-    segments = []
-    for i in range(0, len(audio), split_time - overlap):
-        segments.append(audio[i:i + split_time])
+    print("音声ファイルを分割します")
+    for file_name, audio in audio_files:   
+        split_audio(file_name, audio, SPLIT_TIME, OVERLAP)
+    print("音声ファイルの分割が完了しました")
     
-    print(f"音声ファイルは{len(segments)}個に分割されました")
+    # 分割した音声ファイルの読み込み
+    segmented_audios = list_segmented_audio(CONV_DIR)
+    for i, audio_name in enumerate(segmented_audios):
+        print(f"{audio_name}: 音声をテキスト化しています...")
+        txt = transcribe_audio(CONV_DIR, audio_name, client)
+        save_transcript(CONV_DIR, audio_name, txt)
+        print(f"{audio_name}: テキスト化した音声を保存しました")
 
-    # 分割ファイルの保存
-    for i, segment in enumerate(segments):
-        
-        # 分割ファイルをmp3形式で保存
-        output_mp3 = f"{base_name}_{i:04d}.mp3"
-        segment.export(os.path.join(conv_dir, output_mp3), format="mp3")
+        # 5ファイルごとにインターバルを設ける
+        if (i + 1) % 5 == 0:
+            print("30秒間スリープします...")
+            time.sleep(30)
+            print("スリープ終了")
     
-    print("分割した音声ファイルを保存しました")
-
-    # 音声テキスト化
-    for i, segment in enumerate(segments):
-        # mp3の読み込み
-        output_mp3 = f"{base_name}_{i:04d}.mp3"
-        mp3_audio = open(os.path.join(conv_dir, output_mp3), "rb")
-
-        print("音声をテキスト化しています...")
-        # 音声テキスト化
-        # transcript = openai.Audio.transcribe("whisper-1", mp3_audio)
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=mp3_audio
-        )
-        txt = transcript.text
-
-        # テキスト形式で保存
-        output_txt = f"{base_name}_{i:04d}.txt"
-        f = open(os.path.join(output_dir, output_txt), "w")
-        f.write(txt)
-        f.close()
-
-        print("テキストを次の名前で保存しました： " + output_txt)
+    # テキストを結合して音声ファイルごとにまとめる
+    print("音声ファイルをまとめます")
+    combine_text_files(CONV_DIR, OUTPUT_DIR)
+    print("すべての処理が完了しました")
     
-    # API制限を回避するため、念のためファイル単位でインターバルを設ける
-    if num < len(audio_files) - 1:
-        print("30秒のインターバルに入ります")
-        time.sleep(30)
-        print("インターバル終了。次のファイルを処理します")
