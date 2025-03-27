@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from typing import List, Tuple
 from glob import glob
 from dotenv import load_dotenv
 from pydub import AudioSegment
@@ -14,7 +15,7 @@ SPLIT_TIME = 20 * 60 * 1000  # 1ファイルあたりの最大長（ミリ秒）
 OVERLAP = 20 * 1000  # ファイル分割時の重複区間（ミリ秒）
 INTERVAL = 30  # API 制限回避のためのインターバル（秒）
 
-def setup_directories():
+def setup_directories() -> None:
     """必要なディレクトリを作成する"""
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(CONV_DIR, exist_ok=True)
@@ -49,7 +50,7 @@ def load_audio_files(input_dir):
 
     return audio_files
 
-def split_audio(file_name, audio, split_time, overlap):
+def split_audio(file_name: str, audio: AudioSegment, split_time: int, overlap: int) -> None:
     """音声ファイルを分割して保存する"""
     base_name, _ = os.path.splitext(file_name)
     for i, x in enumerate(range(0, len(audio), split_time - overlap)):
@@ -145,12 +146,11 @@ if __name__ == "__main__":
 
         # 5ファイルごとにインターバルを設ける
         if (i + 1) % 5 == 0:
-            print("30秒間スリープします...")
-            time.sleep(30)
+            print(f"{INTERVAL}秒間スリープします...")
+            time.sleep(INTERVAL)
             print("スリープ終了")
     
     # テキストを結合して音声ファイルごとにまとめる
-    print("音声ファイルをまとめます")
+    print("テキストファイルをまとめます")
     combine_text_files(CONV_DIR, OUTPUT_DIR)
     print("すべての処理が完了しました")
-    
