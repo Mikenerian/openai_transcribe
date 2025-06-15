@@ -4,4 +4,7 @@ env/
 input/
 converted/
 output/
+summarized/
+__pycache__/
 transcribe.log
+summarize.log
